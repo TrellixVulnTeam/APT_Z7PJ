@@ -181,9 +181,8 @@ classdef APTParameters
         elseif all(ismember({'hasTrx' 'ma'},reqs))
           if ~hasTrx && ~isma
             % Special case/hack; if hasTrx and ma are both present, it's an
-         APTParameters.filterPropertiesByCondition(tree.Children(i),...
-           labelerObj,varargin{:});   % OR condition (rather than AND which is the default for 2+
-            % requiremetns)
+            % OR condition (rather than AND which is the default for 2+
+            % requirements)
             tree.Data.Visible = false;
           end
         elseif ismember('ma',reqs) && ~isma
