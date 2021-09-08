@@ -3,11 +3,11 @@ classdef TrackingVisualizerBBox < TrackingVisualizerBase
   
   properties
     lObj
-    
+    hax;
     hbox;                    % nTrx x 1 vector of line handles
     hscr;
 %     hBoxTxt;                     % nTrx x 1 vector of line handles
-    ptrx % ptrx structure: has landmarks in addition to .x, .y
+    trk % ptrx structure: has landmarks in addition to .x, .y
     %frm2trx % [nfrmmax] cell with frm2trx{f} giving iTgts (indices into 
       %.ptrx) that are live 
       % TEMPORARY using frm2trx logical array. cell will be more compact
@@ -19,6 +19,7 @@ classdef TrackingVisualizerBBox < TrackingVisualizerBase
     clrboxothr = [.8510 0.3255 0.0980];
     clrtxt = [.8510 0.3255 0.0980]; %1 0 0];
     fstxt = 12;
+    lwbox = 2;
     
     
     showTrxPreNFrm = 15;      % number of preceding frames to show in traj
@@ -123,22 +124,24 @@ classdef TrackingVisualizerBBox < TrackingVisualizerBase
       %trk.initFrm2Tlt(obj.lObj.nframes);
       
       % trk.frm2tlt should already be initted
-      assert(trk.nframes==obj.lObj.nframes);
+      %assert(trk.nframes==obj.lObj.nframes);
       %assert(size(trk.frm2tlt,1)==obj.lObj.nframes);
       
-      ptrxs = load_tracklet(trk);
-      ptrxs = TrxUtil.ptrxAddXY(ptrxs);
-      obj.ptrx = ptrxs;
+      obj.trk = trk;
+%       ptrxs = load_tracklet(trk);
+%       ptrxs = TrxUtil.ptrxAddXY(ptrxs);
+%       obj.ptrx = ptrxs;
       %obj.frm2trx = trk.frm2tlt;
     end
     function iTrx = frm2trx(obj,frm)
       assert(numel(frm)==1);
-      iTrx = find([obj.ptrx.firstframe]<=frm & [obj.ptrx.endframe]>=frm);
+      t = obj.trk;
+      iTrx = find(t.startframes<=frm & t.endframes>=frm);
     end
     function newFrame(obj,frm)
       % find live tracklets
-      ptrx = obj.ptrx;
-      if isempty(ptrx)
+      t = obj.trk;
+      if isempty(t)
         % eg if no tracklets loaded.
         return;
       end
@@ -159,35 +162,56 @@ classdef TrackingVisualizerBBox < TrackingVisualizerBase
       end
       npts = obj.npts;
       
-      % get landmarks
-      xy = nan(npts,2,nTrx);
-      for j=1:nTrx
-        ptrxJ = ptrx(iTrx(j));
-        idx = frm + ptrxJ.off;
-        xy(:,:,j) = ptrxJ.p(:,:,idx);
+      idxs = frm - t.startframes + 1;
+      for itlt=1:nTrx
+        idx = idxs(itlt);
+        xycorners = t.pTrk{itlt}(:,:,idx);
+        conf = t.pTrkConf{itlt}(1,idx);
+        obj.setbox(itlt,xycorners,conf);
+%         if ~isempty(roiColors)
+%           obj.hbox(i).Color = roiColors(i,:);
+%         end
+      end
+      for itlt=nTrx+1:obj.ntrxmax
+        obj.setbox(itlt,[nan nan; nan nan],nan);
       end
       
-      % update tvmt
-      tfeo = false(npts,nTrx);
-      obj.tvmt.updateTrackRes(xy,tfeo);
+%       % get landmarks
+%       xy = nan(npts,2,nTrx);
+%       for j=1:nTrx
+%         ptrxJ = t(iTrx(j));
+%         idx = frm + ptrxJ.off;
+%         xy(:,:,j) = ptrxJ.p(:,:,idx);
+%       end
+%       
+%       % update tvmt
+%       tfeo = false(npts,nTrx);
+%       obj.tvmt.updateTrackRes(xy,tfeo);
       
-      % update tvtrx; call setShow
-      nLive = numel(iTrx);
-      iTrx2Viz2iTrxNew = zeros(obj.ntrxmax,1);
-      iTrx2Viz2iTrxNew(1:nLive) = iTrx;
-      trxMappingChanged = ~isequal(iTrx2Viz2iTrxNew,obj.iTrxViz2iTrx);
-      obj.iTrxViz2iTrx = iTrx2Viz2iTrxNew;
-      
-      tvtrx = obj.tvtrx; %#ok<*PROPLC>
-      tfLiveTrx = false(tvtrx.nTrx,1);
-      if obj.tfShowTrxTraj
-        tfLiveTrx(1:nLive) = true; 
-      end
-      tfUpdateIDs = trxMappingChanged;      
-      
-      tvtrx.setShow(tfLiveTrx);
-      tvtrx.updateTrxCore(ptrx(iTrx),frm,tfLiveTrx,0,tfUpdateIDs);
+%       % update tvtrx; call setShow
+%       nLive = numel(iTrx);
+%       iTrx2Viz2iTrxNew = zeros(obj.ntrxmax,1);
+%       iTrx2Viz2iTrxNew(1:nLive) = iTrx;
+%       trxMappingChanged = ~isequal(iTrx2Viz2iTrxNew,obj.iTrxViz2iTrx);
+%       obj.iTrxViz2iTrx = iTrx2Viz2iTrxNew;
+%       
+%       tvtrx = obj.tvtrx; %#ok<*PROPLC>
+%       tfLiveTrx = false(tvtrx.nTrx,1);
+%       if obj.tfShowTrxTraj
+%         tfLiveTrx(1:nLive) = true; 
+%       end
+%       tfUpdateIDs = trxMappingChanged;      
+%       
+%       tvtrx.setShow(tfLiveTrx);
+%       tvtrx.updateTrxCore(t(iTrx),frm,tfLiveTrx,0,tfUpdateIDs);
     end
+    
+    function setbox(obj,itlt,xycorners,conf)
+      fprintf(2,'Prob off-by-1\n');
+      set(obj.hbox(itlt),'XData',xycorners([1 1 2 2 1]),'YData',xycorners([3 4 4 3 3]));
+      set(obj.hscr(itlt),'Position',xycorners([1 3]),'String',sprintf('%.2f',conf));
+    end
+    
     function trxSelected(obj,iTrx,tfforce)
       if nargin < 3
         tfforce = false;
