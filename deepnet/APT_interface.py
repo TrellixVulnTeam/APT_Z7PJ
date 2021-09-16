@@ -1053,7 +1053,7 @@ def db_from_lbl(conf, out_fns, split=True, split_file=None, on_gt=False, sel=Non
 
     from_list = True if db_dict is not None else False
     if from_list:
-        local_dirs = db_dict['movieFiles']
+        local_dirs = db_dict['moviesFiles']
         trx_files = db_dict['trxFiles']
     else:
         local_dirs = multiResData.find_local_dirs(conf.labelfile, conf.view, on_gt)
@@ -1172,6 +1172,8 @@ def setup_ma(conf):
     cur_t = T['locdata'][0]
     pack_dir = os.path.split(conf.json_trn_file)[0]
     cur_frame = cv2.imread(os.path.join(pack_dir, cur_t['img'][conf.view]), cv2.IMREAD_UNCHANGED)
+    if cur_frame.ndim>2:
+        cur_frame = cv2.cvtColor(cur_frame,cv2.COLOR_BGR2RGB)
     fr_sz = cur_frame.shape[:2]
     conf.multi_frame_sz = fr_sz
 
@@ -1429,6 +1431,7 @@ def show_crops(im, all_data, roi, extra_roi, conf):
 
 
 def db_from_trnpack_ht(conf, out_fns, nsamples=None, split=True):
+    # TODO: Maybe merge this with db_from_trnpack??
     lbl = h5py.File(conf.labelfile, 'r')
     occ_as_nan = conf.get('ignore_occluded', False)
     T = PoseTools.json_load(conf.json_trn_file)
@@ -1449,6 +1452,9 @@ def db_from_trnpack_ht(conf, out_fns, nsamples=None, split=True):
         cur_frame = cv2.imread(os.path.join(pack_dir, cur_t['img'][conf.view]), cv2.IMREAD_UNCHANGED)
         if cur_frame.ndim == 2:
             cur_frame = cur_frame[..., np.newaxis]
+        else:
+            cur_frame = cv2.cvtColor(cur_frame, cv2.COLOR_BGR2RGB)
+
         cur_locs = np.array(cur_t['pabs']) - 1
         ntgt = cur_t['ntgt']
         cur_locs = cur_locs.reshape([conf.nviews, 2, conf.n_classes, ntgt])
@@ -1465,7 +1471,10 @@ def db_from_trnpack_ht(conf, out_fns, nsamples=None, split=True):
 
         sndx = cur_t['split']
         if type(sndx) == list:
-            sndx = sndx[0]
+            if len(sndx)<1:
+                sndx = 0
+            else:
+                sndx = sndx[0]
         cur_out = out_fns[sndx]
 
         for ndx in range(len(cur_locs)):
@@ -1502,7 +1511,7 @@ def db_from_trnpack_ht(conf, out_fns, nsamples=None, split=True):
     return splits, sel
 
 
-def db_from_trnpack(conf, out_fns, nsamples=None, split=True):
+def db_from_trnpack(conf, out_fns, nsamples=None, split=True,only_ht=True):
     # Creates db from new trnpack format instead of stripped label files.
     # outputs is a list of functions. The first element writes
     # to the training dataset while the second one write to the validation
@@ -1535,6 +1544,9 @@ def db_from_trnpack(conf, out_fns, nsamples=None, split=True):
         cur_frame = cv2.imread(os.path.join(pack_dir, cur_t['img'][conf.view]), cv2.IMREAD_UNCHANGED)
         if cur_frame.ndim == 2:
             cur_frame = cur_frame[..., np.newaxis]
+        else:
+            cur_frame = cv2.cvtColor(cur_frame, cv2.COLOR_BGR2RGB)
+
         cur_locs = np.array(cur_t['pabs']) - 1
         ntgt = cur_t['ntgt']
         cur_locs = cur_locs.reshape([conf.nviews, 2, conf.n_classes, ntgt])
@@ -2997,6 +3009,8 @@ def classify_list_file(args, view, view_ndx=0):
             else:
                 trxFiles.append(trxset)
         toTrack['trxFiles'] = trxFiles
+    else:
+        toTrack['trxFiles'] = [None,]*len(toTrack['movieFiles'])
 
     hasCrops = 'cropLocs' in toTrack
     cropLocs = None
@@ -3035,14 +3049,14 @@ def classify_list_file(args, view, view_ndx=0):
         else:
             assert False, 'Invalid frame specification in toTrack[%d]' % (i)
 
-    db_dict = {'moviesFiles':toTrack['movieFiles'],'trxFiles':toTrack['trxFiles'],'cropLocs':toTrack['cropLocs'],'toTrack':cur_list}
+    db_dict = {'moviesFiles':toTrack['movieFiles'],'trxFiles':toTrack['trxFiles'],'cropLocs':cropLocs,'toTrack':cur_list}
     db_file = tempfile.mkstemp()[1]
     db_file_val = tempfile.mkstemp()[1]
 
     lbl_file = args.lbl_file
     name = args.name
     first_stage = args.stage=='multi' or args.stage=='first'
-    conf = create_conf(lbl_file,view,name,cache_dir=args.cache_dir, net_type=args.type,conf_params=args.conf_params,first_stage=first_stage)
+    conf = create_conf(lbl_file,view,name,cache_dir=args.cache, net_type=args.type,conf_params=args.conf_params,first_stage=first_stage)
 
     if conf.db_format == 'coco':
         create_coco_db(conf,split=False,db_files=(db_file,db_file_val),use_cache=False,db_dict=db_dict)
@@ -3667,6 +3681,7 @@ def train_multi_stage(args, nviews):
         train(lbl_file, nviews, name, args, first_stage=True)
         args.type = args.type2
         args.conf_params = args.conf_params2
+        args.model_file = args.model_file2
         train(lbl_file, nviews, name, args, second_stage=True)
     elif args.stage == 'first':
         train(lbl_file, nviews, name, args, first_stage=True)
@@ -3786,9 +3801,8 @@ def parse_args(argv):
     parser.add_argument('-name', dest='name', help='Name for the run. Default - apt', default='apt')
     parser.add_argument('-view', dest='view', help='Run only for this view. If not specified, run for all views',
                         default=None, type=int)
-    parser.add_argument('-model_files', dest='model_file',
-                        help='Use this model file. For tracking this overrides the latest model file. For training this will be used for initialization',
-                        default=None, nargs='*')
+    parser.add_argument('-model_files', dest='model_file', help='Use this model file. For tracking this overrides the latest model file. For training this will be used for initialization', default=None, nargs='*')
+    parser.add_argument('-model_files2', dest='model_file2', help='Use this model file for second stage. For tracking this overrides the latest model file. For training this will be used for initialization', default=None, nargs='*')
     parser.add_argument('-cache', dest='cache', help='Override cachedir in lbl file', default=None)
     parser.add_argument('-debug', dest='debug', help='Print debug messages', action='store_true')
     parser.add_argument('-no_except', dest='no_except', help='Dont catch exception. Useful for debugging',
@@ -3977,6 +3991,10 @@ def check_args(args,nviews):
             args.model_file = [None]*nviews
         else:
             assert len(args.model_file) == nviews, 'Number of model files should be same as number of views for training'
+        if args.model_file2 is None:
+            args.model_file2 = [None]*nviews
+        else:
+            assert len(args.model_file2) == nviews, 'Number of model files should be same as number of views for training'
 
     elif args.sub_name == 'track' and args.list_file is not None:
         # KB 20190123: added list_file input option
@@ -3989,6 +4007,10 @@ def check_args(args,nviews):
             args.model_file = [None] * nviews
         else:
             assert len(args.model_file) == nviews, 'Number of model files should be same as the number of views to track (%d)' % nviews
+        if args.model_file2 is None:
+            args.model_file2 = [None] * nviews
+        else:
+            assert len(args.model_file2) == nviews, 'Number of model files should be same as the number of views to track (%d)' % nviews
 
     elif args.sub_name == 'track':
 
@@ -4003,6 +4025,10 @@ def check_args(args,nviews):
                 args.model_file = [None] * nviews
             else:
                 assert len(args.model_file) == nviews, 'Number of movie files should be same as the number of trx files'
+            if args.model_file2 is None:
+                args.model_file2 = [None] * nviews
+            else:
+                assert len(args.model_file2) == nviews, 'Number of movie files should be same as the number of trx files'
             if args.crop_loc is not None:
                 assert len(args.crop_loc) == 4 * nviews, 'cropping location should be specified as xlo xhi ylo yhi for all the views'
         else:
@@ -4030,6 +4056,10 @@ def check_args(args,nviews):
             args.model_file = [None] * len(views)
         else:
             assert len(args.model_file) == len(views), 'Number of model files specified must match number of views to be processed'
+        if args.model_file2 is None:
+            args.model_file2 = [None] * len(views)
+        else:
+            assert len(args.model_file2) == len(views), 'Number of model files specified must match number of views to be processed'
 
         assert args.out_files is not None
 
@@ -4041,9 +4071,16 @@ def check_args(args,nviews):
                 args.model_file = [None] * nviews
             else:
                 assert len(args.model_file) == nviews, 'Number of movie files should be same as the number of trx files'
+            if args.model_file2 is None:
+                args.model_file2 = [None] * nviews
+            else:
+                assert len(
+                    args.model_file2) == nviews, 'Number of movie files should be same as the number of trx files'
         else:
             if args.model_file is None:
                 args.model_file = [None]* nviews
+            if args.model_file2 is None:
+                args.model_file2 = [None]* nviews
 
 
 
