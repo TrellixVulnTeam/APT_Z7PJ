@@ -387,6 +387,7 @@ classdef Labeler < handle
     labelPointsPlotInfo;  % struct containing cosmetic info for labelPoints. init: C
     predPointsPlotInfo;  % " predicted points. init: C
     impPointsPlotInfo;
+%     lblSuggMFTable; % % [nlblSugg x ncol] MFTable for suggested frames to label. .mov values are MovieIndexes
   end
   properties (SetAccess=private)
     nLabelPoints;         % scalar integer. This is the total number of 2D labeled points across all views. Contrast with nPhysPoints. init: C
@@ -440,7 +441,12 @@ classdef Labeler < handle
   properties
     fgEmpiricalPDF % struct containing empirical FG pdf and metadata
   end
-  
+  properties
+      lblSuggMFTable; % % [nlblSugg x ncol] MFTable for suggested frames to label. .mov values are MovieIndexes
+  end
+  events
+      lblSuggUpdated
+  end 
   %% MA
   properties
     maIsMA
@@ -10292,7 +10298,28 @@ classdef Labeler < handle
       tfsucc = true;
     end
     
-    function suspComputeUI(obj)
+%     function suspComputeUI(obj)
+%       tfsucc = obj.suspCompute();
+%       if ~tfsucc
+%         return;
+%       end
+%       figtitle = sprintf('Suspicious frames: %s',obj.suspDiag);
+%       hF = figure('Name',figtitle);
+%       tbl = obj.suspSelectedMFT;
+%       tblFlds = tbl.Properties.VariableNames;
+%       nt = NavigationTable(hF,[0 0 1 1],@(i,rowdata)obj.suspCbkTblNaved(i),...
+%         'ColumnName',tblFlds);
+%       nt.setData(tbl);
+% %       nt.navOnSingleClick = true;
+%       hF.UserData = nt;
+% %       kph = SuspKeyPressHandler(nt);
+% %       setappdata(hF,'keyPressHandler',kph);
+% 
+%       obj.addDepHandle(hF);
+%     end
+    
+    
+        function suspComputeUI(obj)
       tfsucc = obj.suspCompute();
       if ~tfsucc
         return;
@@ -14052,7 +14079,136 @@ classdef Labeler < handle
       tx = obj.gdata.txTotalFramesLabeled;
       tx.String = num2str(nTgtsTot);
     end
+    
+      %AR add label suggestions 9/8/2021
+      function loadLblSuggestionsUI(lObj)
+          
+          [fname,pth] = uigetfile('*.mat','Load Label Table');
+          if isequal(fname,0)
+              return;
+          end
+          fname = fullfile(pth,fname);
+          
+          %not in gt more or MA
+          assert(~lObj.gtIsGTMode);
+          assert(~lObj.maIsMA);
+          
+          tbl = MFTable.loadTableFromMatfile(fname);
+          if ~isnumeric(tbl.mov)
+              [ttfound,mIdx] = lObj.getMovIdxMovieFilesAllFull(tbl.mov,'gt',false);
+              if any(~ttfound)
+                  errstrs = { 'Moviesets in table not found in project:'};
+                  movstrsnotfound = MFTable.formMultiMovieIDArray(tbl.mov(~ttfound,:),...
+                      'separator',',','checkseparator',false);
+                  errstrs = [errstrs; movstrsnotfound];
+                  errordlg(errstrs,'Moviesets not found');
+                  return;
+              end
+              szassert(mIdx,[height(tbl) 1]);
+              assert(isa(mIdx,'MovieIndex'));
+              [iMov] = mIdx.get();
+              assert(all(iMov));
+              tbl.mov = mIdx;
+          end
+          lObj.lblSetUserSuggestions(tbl)
+          msgstr = sprintf('Loaded label suggestion table with %d rows spanning %d movies.',...
+              height(tbl),numel(unique(tbl.mov)));
+          msgbox(msgstr,'Label Suggestions Table Loaded');
+      end
+      
+     function lblSetUserSuggestions(obj,tblMFT,varargin)
+      % Set user-specified/defined Label suggestions
+      %
+      % tblMFT: .mov (MovieIndices), .frm, .iTgt. If [], default to all
+      % labeled GT rows in proj
+      
+      sortcanonical = myparse(varargin,...
+        'sortcanonical',false);
+      
+%       if isequal(tblMFT,[])
+%         fprintf(1,'Defaulting to all labeled GT frames in project...\n');
+%         tblMFT = obj.labelGetMFTableLabeled('useTrain',0,'mftonly',true);
+%         fprintf(1,'... found %d GT rows.\n',height(tblMFT));
+%       end
+      
+      if ~istable(tblMFT) && ~all(tblfldscontains(tblMFT,MFTable.FLDSID))
+        error('Specified table is not a valid Movie-Frame-Target table.');
+      end
+      
+      tblMFT = tblMFT(:,MFTable.FLDSID);
+      
+%       if ~isa(tblMFT.mov,'MovieIndex')
+%         warningNoTrace('Table .mov is numeric. Assuming positive indices into GT movie list (.movieFilesAllGT).');
+%         tblMFT.mov = MovieIndex(tblMFT.mov,true);
+%       end
+      
+      if isempty(tblMFT)
+        % pass
+      else
+        [tf,tfGT] = tblMFT.mov.isConsistentSet();
+        if ~(tf && ~tfGT)
+          error('All MovieIndices in input table must reference training movies.');
+        end
+        
+        n0 = height(tblMFT);
+        n1 = height(unique(tblMFT(:,MFTable.FLDSID)));
+        if n0~=n1
+          error('Input table appears to contain duplicate rows.');
+        end
+        
+        if sortcanonical
+          tblMFT2 = MFTable.sortCanonical(tblMFT);
+          if ~isequal(tblMFT2,tblMFT)
+            warningNoTrace('Sorting table into canonical row ordering.');
+            tblMFT = tblMFT2;
+          end
+        else
+          % UI requires sorting by movies; hopefully the movie sort leaves
+          % row ordering otherwise undisturbed. This appears to be the case
+          % in 2017a.
+          %
+          % See issue #201. User has a gtSuggestions table that is not fully
+          % sorted by movie, but with a desired random row order within each
+          % movie. A full/canonical sorting would be undesireable.
+          tblMFT2 = sortrows(tblMFT,{'mov'},{'ascend'}); % ascend as training movieindices are positive
+          if ~isequal(tblMFT2,tblMFT)
+            warningNoTrace('Sorting table by movie.');
+            tblMFT = tblMFT2;
+          end
+        end
+      end
+      
+      obj.lblSuggMFTable = tblMFT;
+      obj.lblUpdateSuggMFTableLbledComplete();
+      obj.notify('lblSuggUpdated');
+          
+    end
+      function lblUpdateSuggMFTableLbledComplete(obj,varargin)
+      % update .gtUpdateSuggMFTableLbled from .gtSuggMFTable/.labeledposGT
+      
+      donotify = myparse(varargin,...
+        'donotify',false); 
+      
+      tbl = obj.lblSuggMFTable;
+      if isempty(tbl)
+        obj.lblSuggMFTableLbled = false(0,1);
+        if donotify
+          obj.notify('lblSuggUpdated'); % use this event for full/general update
+        end
+        return;
+      end
+      % won't be true to training suggestions
+%       tfAllTgtsLbled = obj.getIsLabeled(tbl);
+%       szassert(tfAllTgtsLbled,[height(tbl) 1]);
+%       obj.gtSuggMFTableLbled = tfAllTgtsLbled;
+%       if donotify
+%         obj.notify('gtSuggUpdated'); % use this event for full/general update
+%       end
+    end
+    
   end
+  
+
   
   methods (Hidden)
 
