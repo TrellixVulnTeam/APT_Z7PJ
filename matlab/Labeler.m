@@ -14116,7 +14116,7 @@ classdef Labeler < handle
       tx.String = num2str(nTgtsTot);
     end
     
-      %AR add label suggestions 9/8/2021
+      %ALICE WORKING add label suggestions 9/8/2021
       function loadLblSuggestionsUI(lObj)
           
           [fname,pth] = uigetfile('*.mat','Load Label Table');
