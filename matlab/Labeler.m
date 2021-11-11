@@ -9398,7 +9398,7 @@ classdef Labeler < handle
     function viewCalCheckCalRigObj(obj,crObj)
       % Basic checks on calrig obj
       
-      if ~(isequal(crObj,[]) || isa(crObj,'CalRig')&&isscalar(crObj))
+      if ~(isequal(crObj,[]) || isa(crObj,'CalRig')&&isscalar(crObj) || isa(crObj,'struct')&&isfield(crObj,'type')&&strcmp(crObj.type,'multi_caltech'))
         error('Labeler:viewCal','Invalid calibration object.');
       end
       nView = obj.nview;
@@ -9548,13 +9548,7 @@ classdef Labeler < handle
           'Add/select a movie first before setting the calibration object.');
       end
 
-      try
-        obj.viewCalCheckCalRigObj(crObj);
-      catch ME
-        if obj.nview == 2
-          rethrow(ME)
-        end
-      end
+      obj.viewCalCheckCalRigObj(crObj);
 
       vcdPW = obj.viewCalProjWide;
       if isempty(vcdPW)
