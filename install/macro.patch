@@ -1,0 +1,20 @@
+--- Macros.h	2022-07-05 15:30:00.106336000 -0400
++++ Macros.h	2022-07-05 15:31:40.003202000 -0400
+@@ -308,7 +308,7 @@
+ 
+ #if defined(__CUDA_ARCH__)
+ #if defined(_MSC_VER) && defined(__CUDACC__)
+-#define CONSTEXPR_EXCEPT_WIN_CUDA
++#define CONSTEXPR_EXCEPT_WIN_CUDA const
+ #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+ #else
+ #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+@@ -316,7 +316,7 @@
+ #endif
+ #else
+ #if defined(_MSC_VER) && defined(__CUDACC__)
+-#define CONSTEXPR_EXCEPT_WIN_CUDA
++#define CONSTEXPR_EXCEPT_WIN_CUDA const
+ #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+ #else
+ #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
